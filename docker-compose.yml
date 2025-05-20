@@ -6,18 +6,45 @@ networks:
   backend:
   frontend:
 
+x-common-env: &common-env
+  HOSTNAME: "0.0.0.0"
+  PORT: 3000
+  REDIS_URL: redis://redis:6379
+  CORE_PUBLIC_URL: http://development.mairie360.fr
+
+x-depends-on: &depends-on
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+
+x-healthcheck: &healthcheck
+  test: ["CMD", "curl", "-f", "http://localhost:3000"]
+  interval: 10s
+  timeout: 5s
+  retries: 5
+
+x-service: &service-template
+  pull_policy: always
+  restart: always
+  expose:
+    - "3000"
+  networks:
+    - backend
+    - frontend
+  healthcheck:
+    <<: *healthcheck
+
 services:
   postgres:
     image: postgres:17.4-bookworm
     restart: always
     environment:
-      - POSTGRES_ROOT_PASSWORD=root
       - POSTGRES_USER=postgres
       - POSTGRES_PASSWORD=postgres
     expose:
       - "5432"
     volumes:
-      - ./init.sql:/docker-entrypoint-initdb.d/init.sql
       - postgres-data:/var/lib/postgresql/data
     networks:
       - backend
@@ -43,54 +70,34 @@ services:
       retries: 5
 
   core:
+    <<: *service-template
     image: ghcr.io/mairie360/core:latest
-    restart: always
     environment:
-      HOSTNAME: "0.0.0.0"
-      PORT: 3000
+      <<: *common-env
       POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/core
-      REDIS_URL: redis://redis:6379
-    expose:
-      - "3000"
-    networks:
-      - backend
-      - frontend
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
+  
   emails:
+    <<: *service-template
     build:
       context: .
-      dockerfile: Dockerfile
-    pull_policy: always
-    restart: always
+      dockerfile: development.Dockerfile
+    develop:
+      watch:
+        - action: sync
+          path: ./src
+          target: /usr/src/emails/src
+        - action: rebuild
+          path: package*.json
     environment:
-      HOSTNAME: "0.0.0.0"
-      PORT: 3000
+      <<: *common-env
       POSTGRES_URL: postgresql://postgres:postgres@postgres:5432/emails
-      REDIS_URL: redis://redis:6379
-      CORE_PUBLIC_URL: http://development.mairie360.fr
-    expose:
-      - "3000"
-    networks:
-      - backend
-      - frontend
     depends_on:
-      core:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:3000"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      <<: *depends-on
 
   nginx:
     image: nginx:1.27.4-bookworm
@@ -102,5 +109,7 @@ services:
     networks:
       - frontend
     depends_on:
+      core:
+        condition: service_healthy
       emails:
         condition: service_healthy

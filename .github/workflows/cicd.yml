@@ -14,6 +14,6 @@ jobs:
   CICD:
     uses: mairie360/CICD/.github/workflows/frontend-cicd.yml@main
     with:
-      package_name: "projects-front"
+      package_name: "email-front"
       node_version: 23
     secrets: inherit
